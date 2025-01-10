@@ -164,12 +164,69 @@ def fetch_countries() -> dict:
 
 
 def fetch_numbers(country: str, page: int) -> dict:
-    url = "https://api-1.online/post/"
-    params = {"action": "GetFreeNumbers", "type": "user"}
-    headers = HEADERS.copy()
-    headers["authorization"] = "Bearer " + AUTH_KEY
-    json = {"country_name": country, "limit": 10, "page": page}
-    return requests.post(url, params=params, headers=headers, json=json).json()
+    try:
+        url = "https://api-1.online/post/"
+        params = {"action": "GetFreeNumbers", "type": "user"}
+        headers = HEADERS.copy()
+        headers["authorization"] = "Bearer " + AUTH_KEY
+        json = {"country_name": country, "limit": 10, "page": page}
+        
+        response = requests.post(url, params=params, headers=headers, json=json)
+        
+        # Debug information
+        print(f"{YEL}Debug - API Response Status: {response.status_code}".center(os.get_terminal_size().columns))
+        
+        try:
+            data = response.json()
+            # Debug information
+            print(f"{YEL}Debug - API Response: {str(data)[:200]}...".center(os.get_terminal_size().columns))
+            
+            # Check for error messages
+            if "error" in data:
+                warn(f"API Error: {data.get('error', 'Unknown error')}")
+                return {"Available_numbers": [], "Total_Pages": 0}
+            
+            # Try different possible response structures
+            if "records" in data:
+                return {
+                    "Available_numbers": data["records"],
+                    "Total_Pages": data.get("total_pages", 1)
+                }
+            elif "numbers" in data:
+                return {
+                    "Available_numbers": data["numbers"],
+                    "Total_Pages": data.get("total_pages", 1)
+                }
+            elif "data" in data:
+                return {
+                    "Available_numbers": data["data"],
+                    "Total_Pages": data.get("total_pages", 1)
+                }
+            else:
+                # If none of the expected structures match, try to use the response as is
+                if isinstance(data, list):
+                    return {
+                        "Available_numbers": data,
+                        "Total_Pages": 1
+                    }
+                elif isinstance(data, dict):
+                    for key, value in data.items():
+                        if isinstance(value, list):
+                            return {
+                                "Available_numbers": value,
+                                "Total_Pages": data.get("total_pages", 1)
+                            }
+            
+            warn(f"Unexpected API response structure: {str(data)[:200]}...")
+            return {"Available_numbers": [], "Total_Pages": 0}
+            
+        except ValueError as e:
+            warn(f"Invalid JSON response: {str(e)}")
+            return {"Available_numbers": [], "Total_Pages": 0}
+            
+    except Exception as e:
+        warn(f"Error fetching numbers: {str(e)}")
+        return {"Available_numbers": [], "Total_Pages": 0}
 
 
 def fetch_sms(number: str) -> dict:
@@ -242,25 +299,30 @@ def main():
                 warn("Wrong Input")
             except KeyboardInterrupt:
                 exit(0)
+                
         page = fetch_numbers(tmp_countries[choice - 1]["Country_Name"], 1)
-        list_numbers = page["Available_numbers"]
-        if page["Total_Pages"] == 0:
+        list_numbers = page.get("Available_numbers", [])
+        total_pages = page.get("Total_Pages", 0)
+        
+        if not list_numbers:
             warn("No numbers available")
             time.sleep(1.2)
             main()
-        for i in range(2, page["Total_Pages"] + 1):
-            list_numbers.extend(
-                fetch_numbers(
-                    tmp_countries[choice - 1]["Country_Name"],
-                    i,
-                )["Available_numbers"]
-            )
+            return
+            
+        for i in range(2, total_pages + 1):
+            response = fetch_numbers(tmp_countries[choice - 1]["Country_Name"], i)
+            numbers = response.get("Available_numbers", [])
+            if numbers:
+                list_numbers.extend(numbers)
             if len(list_numbers) > 149:
                 break
-        for iteration, i in enumerate(list_numbers, start=1):
+        for iteration, number in enumerate(list_numbers, start=1):
+            number_display = number.get("E.164") or number.get("number") or number.get("phone_number", "Unknown")
+            time_display = number.get("time") or number.get("created_at", "Unknown")
             print(
                 "{}{}. {} {}".format(
-                    random.choice(COLORS), iteration, i["E.164"], i["time"]
+                    random.choice(COLORS), iteration, number_display, time_display
                 ).center(os.get_terminal_size().columns)
             )
         while True:
@@ -275,64 +337,53 @@ def main():
                     break
                 else:
                     warn("Wrong Input")
+            except KeyboardInterrupt:
+                exit(0)
         if choice.upper() == "R":
             per = int(len(list_numbers) * 20 / 100)
-            weight = [2 for i in range(per)] + [
-                1 for i in range(len(list_numbers) - per)
-            ]
-            rnd = random.choices(list_numbers, weights=weight, k=1)[0]["E.164"]
-        while True:
-            try:
-                print(
-                    f"{random.choice(COLORS)}Selected Number: {rnd}".center(
-                        os.get_terminal_size().columns
-                    )
-                )
-                _ = copy_clipboard(rnd)
-                if not _[0] == True:
-                    print(RED + _[1].center(os.get_terminal_size().columns))
-                else:
-                    print(
-                        GRE
-                        + "Number Copied To The Clipboard".center(
-                            os.get_terminal_size().columns
-                        )
-                    )
-                print_sms(rnd)
-            except NameError:
-                print(
-                    f'{random.choice(COLORS)}Selected Number: {list_numbers[int(choice)-1]["E.164"]}'.center(
-                        os.get_terminal_size().columns
-                    )
-                )
-                _ = copy_clipboard(list_numbers[int(choice) - 1]["E.164"])
-                if not _[0] == True:
-                    print(RED + _[1].center(os.get_terminal_size().columns))
-                else:
-                    print(
-                        GRE
-                        + "Number Copied To The Clipboard".center(
-                            os.get_terminal_size().columns
-                        )
-                    )
-                print_sms(list_numbers[int(choice) - 1]["E.164"])
+            weight = [2 for i in range(per)] + [1 for i in range(len(list_numbers) - per)]
+            selected_number = random.choices(list_numbers, weights=weight, k=1)[0]
+        else:
+            selected_number = list_numbers[int(choice) - 1]
+        
+        number_display = selected_number.get("E.164") or selected_number.get("number") or selected_number.get("phone_number", "Unknown")
+        print(
+            f"{random.choice(COLORS)}Selected Number: {number_display}".center(
+                os.get_terminal_size().columns
+            )
+        )
+        _ = copy_clipboard(number_display)
+        if not _[0] == True:
+            print(RED + _[1].center(os.get_terminal_size().columns))
+        else:
             print(
-                BOLD + "Press <Enter> To Refresh".center(os.get_terminal_size().columns)
+                GRE
+                + "Number Copied To The Clipboard".center(
+                    os.get_terminal_size().columns
+                )
             )
-            input(
-                BOLD + "Or Ctrl+c To Main Menu".center(os.get_terminal_size().columns)
-            )
-            logo()
+        print_sms(number_display)
+        print(
+            BOLD + "Press <Enter> To Refresh".center(os.get_terminal_size().columns)
+        )
+        input(
+            BOLD + "Or Ctrl+c To Main Menu".center(os.get_terminal_size().columns)
+        )
+        logo()
     except KeyboardInterrupt:
         main()
 
 
 if __name__ == "__main__":
-    if check_update()[0]:
-        warn("Update Available")
-        info("Updating...")
-        update()
-        info("Successfully Updated")
-        info("Run the Program Again")
-        exit()
+    # Skip update check for now as it's causing issues
+    # if check_update()[0]:
+    #     warn("Update Available")
+    #     info("Updating...")
+    #     if not update():
+    #         warn("Update Failed - Continuing with current version")
+    #         time.sleep(2)
+    #     else:
+    #         info("Successfully Updated")
+    #         info("Run the Program Again")
+    #         exit()
     main()
