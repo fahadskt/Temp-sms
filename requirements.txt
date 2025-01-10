@@ -1,5 +1,7 @@
-requests
-colorama
-pyfiglet
-pyperclip
-pycryptodome
+pycryptodome>=3.19.0
+requests>=2.31.0
+colorama>=0.4.6
+pyfiglet>=1.0.2
+pyperclip>=1.8.2
+PyQt6>=6.6.1
+qt-material>=2.14
